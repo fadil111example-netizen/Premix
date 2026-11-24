@@ -71,12 +71,42 @@ jobs:
           packages: 'platform-tools'
 
       # 4. Build semua plugin
+      #    - Seluruh output Gradle disimpan ke logs/build-log.txt
+      #    - Otomatis coba ulang sampai 3x (JitPack kadang butuh waktu / gagal sesaat)
       - name: Build plugins
         working-directory: src
         run: |
           chmod +x gradlew
-          ./gradlew make makePluginsJson --stacktrace
-          ./gradlew ensureJarCompatibility || echo "::warning::ensureJarCompatibility gagal/tidak ada, dilewati"
+          mkdir -p "$GITHUB_WORKSPACE/logs"
+          LOG="$GITHUB_WORKSPACE/logs/build-log.txt"
+          : > "$LOG"
+
+          status=1
+          for attempt in 1 2 3; do
+            echo "===== Percobaan build ke-$attempt =====" | tee -a "$LOG"
+            extra=""
+            if [ "$attempt" -gt 1 ]; then extra="--refresh-dependencies"; fi
+
+            set +e
+            ./gradlew make makePluginsJson --stacktrace --console=plain $extra 2>&1 | tee -a "$LOG"
+            status=${PIPESTATUS[0]}
+            set -e
+
+            if [ "$status" -eq 0 ]; then
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "Build gagal, tunggu 60 detik lalu coba lagi..." | tee -a "$LOG"
+              sleep 60
+            fi
+          done
+
+          if [ "$status" -ne 0 ]; then
+            echo "::error::Build gagal setelah 3 percobaan. Download artifact 'build-log' untuk log lengkap."
+            exit "$status"
+          fi
+
+          ./gradlew ensureJarCompatibility --console=plain 2>&1 | tee -a "$LOG" || echo "::warning::ensureJarCompatibility gagal/tidak ada, dilewati"
 
       # 5. Kumpulkan hasil build ke folder "builds"
       - name: Collect build results
@@ -143,3 +173,46 @@ jobs:
             echo "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/builds/repo.json"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # ===== Di bawah ini hanya jalan kalau build GAGAL =====
+
+      # 9. Cek status JitPack (penyedia plugin Gradle CloudStream), disimpan ke logs/
+      - name: JitPack diagnostic
+        if: failure()
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/logs"
+          OUT="$GITHUB_WORKSPACE/logs/jitpack-check.txt"
+          {
+            echo "== maven-metadata.xml =="
+            curl -s --max-time 30 -o /dev/null -w "HTTP %{http_code}\n" https://jitpack.io/com/github/recloudstream/gradle/master-SNAPSHOT/maven-metadata.xml
+            echo "== build.log JitPack (80 baris terakhir) =="
+            curl -s --max-time 30 https://jitpack.io/com/github/recloudstream/gradle/master-SNAPSHOT/build.log | tail -n 80
+          } > "$OUT" 2>&1 || true
+
+      # 10. Ringkasan error singkat di halaman Summary
+      - name: Summarize error
+        if: failure()
+        run: |
+          LOG="$GITHUB_WORKSPACE/logs/build-log.txt"
+          {
+            echo "### ❌ Build gagal"
+            echo ""
+            echo "Download log lengkap: scroll ke bagian **Artifacts** di bawah halaman ini, lalu ketuk **build-log**."
+            echo ""
+            if [ -f "$LOG" ]; then
+              echo "Potongan error terakhir:"
+              echo '```'
+              (grep -A15 "What went wrong" "$LOG" | tail -n 25) || tail -n 40 "$LOG"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # 11. Upload log supaya bisa di-download (sukses maupun gagal)
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: logs/
+          if-no-files-found: ignore
+          retention-days: 7
