@@ -1,0 +1,141 @@
+name: Build
+
+concurrency:
+  group: "build"
+  cancel-in-progress: true
+
+on:
+  # Tombol "Run workflow" manual di tab Actions
+  workflow_dispatch:
+  # Otomatis jalan setiap ada push ke main/master
+  push:
+    branches:
+      - main
+      - master
+    paths-ignore:
+      - '*.md'
+
+permissions:
+  contents: write
+
+env:
+  # Nama yang tampil di aplikasi CloudStream (boleh kamu ganti)
+  REPO_NAME: "Premix Repo"
+  REPO_DESCRIPTION: "Kumpulan plugin CloudStream"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      # 1. Ambil source code ke folder "src"
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          path: "src"
+
+      # 2. Siapkan folder "builds".
+      #    Kalau branch "builds" sudah ada -> di-clone.
+      #    Kalau belum ada -> dibuat otomatis (tidak error lagi).
+      - name: Prepare builds branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git ls-remote --exit-code --heads "$REMOTE" builds >/dev/null 2>&1; then
+            echo "Branch builds sudah ada, di-clone."
+            git clone --branch builds --single-branch --depth 1 "$REMOTE" "$GITHUB_WORKSPACE/builds"
+          else
+            echo "Branch builds belum ada, akan dibuat baru."
+            mkdir -p "$GITHUB_WORKSPACE/builds"
+          fi
+
+      # 3. Bersihkan plugin lama (repo.json dibuat ulang otomatis di langkah 6)
+      - name: Clean old builds
+        run: |
+          cd "$GITHUB_WORKSPACE/builds"
+          rm -f ./*.cs3 ./*.jar ./plugins.json
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: temurin
+          cache: gradle
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      # 4. Build semua plugin
+      - name: Build plugins
+        working-directory: src
+        run: |
+          chmod +x gradlew
+          ./gradlew make makePluginsJson --stacktrace
+          ./gradlew ensureJarCompatibility || echo "::warning::ensureJarCompatibility gagal/tidak ada, dilewati"
+
+      # 5. Kumpulkan hasil build ke folder "builds"
+      - name: Collect build results
+        run: |
+          cd "$GITHUB_WORKSPACE/src"
+          shopt -s nullglob
+
+          if [ ! -f build/plugins.json ]; then
+            echo "::error::build/plugins.json tidak ditemukan, build gagal"
+            exit 1
+          fi
+
+          files=( */build/*.cs3 )
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::Tidak ada file .cs3 yang dihasilkan"
+            exit 1
+          fi
+          cp "${files[@]}" "$GITHUB_WORKSPACE/builds/"
+
+          jars=( */build/*.jar )
+          if [ ${#jars[@]} -gt 0 ]; then
+            cp "${jars[@]}" "$GITHUB_WORKSPACE/builds/"
+          fi
+
+          cp build/plugins.json "$GITHUB_WORKSPACE/builds/"
+          echo "Jumlah plugin .cs3: ${#files[@]}"
+
+      # 6. Buat repo.json otomatis (selalu menunjuk ke repo kamu sendiri)
+      - name: Generate repo.json
+        run: |
+          PLUGINS_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/builds/plugins.json"
+          jq -n \
+            --arg name "$REPO_NAME" \
+            --arg desc "$REPO_DESCRIPTION" \
+            --arg list "$PLUGINS_URL" \
+            '{name: $name, description: $desc, manifestVersion: 1, pluginLists: [$list]}' \
+            > "$GITHUB_WORKSPACE/builds/repo.json"
+          cat "$GITHUB_WORKSPACE/builds/repo.json"
+
+      # 7. Push ke branch "builds" (history selalu 1 commit supaya repo tidak membengkak)
+      - name: Push builds
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd "$GITHUB_WORKSPACE/builds"
+          rm -rf .git
+          git init -q -b builds
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Build update: ${GITHUB_SHA}"
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --force origin builds
+
+      # 8. Tampilkan link repo.json di ringkasan run
+      - name: Show repo link
+        run: |
+          {
+            echo "### Build selesai ✅"
+            echo ""
+            echo "Link yang ditempel di aplikasi CloudStream:"
+            echo ""
+            echo '```'
+            echo "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/builds/repo.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
