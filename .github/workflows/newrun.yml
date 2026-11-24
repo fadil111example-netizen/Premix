@@ -72,13 +72,15 @@ jobs:
 
       # 4. Build semua plugin
       #    - Seluruh output Gradle disimpan ke logs/build-log.txt
-      #    - Otomatis coba ulang sampai 3x (JitPack kadang butuh waktu / gagal sesaat)
+      #    - --continue: semua plugin tetap dicoba walau satu gagal (log lebih lengkap)
+      #    - Coba ulang (maks 3x) HANYA kalau penyebabnya jaringan / gagal download dependency
       - name: Build plugins
         working-directory: src
         run: |
           chmod +x gradlew
           mkdir -p "$GITHUB_WORKSPACE/logs"
           LOG="$GITHUB_WORKSPACE/logs/build-log.txt"
+          TMP="$RUNNER_TEMP/attempt.log"
           : > "$LOG"
 
           status=1
@@ -88,21 +90,28 @@ jobs:
             if [ "$attempt" -gt 1 ]; then extra="--refresh-dependencies"; fi
 
             set +e
-            ./gradlew make makePluginsJson --stacktrace --console=plain $extra 2>&1 | tee -a "$LOG"
+            ./gradlew make makePluginsJson --stacktrace --continue --console=plain $extra 2>&1 | tee "$TMP"
             status=${PIPESTATUS[0]}
             set -e
+            cat "$TMP" >> "$LOG"
 
             if [ "$status" -eq 0 ]; then
               break
             fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "Build gagal, tunggu 60 detik lalu coba lagi..." | tee -a "$LOG"
-              sleep 60
+
+            if grep -qE "Could not (resolve|find|GET|HEAD)|Read timed out|Connection (reset|refused)|Premature end of" "$TMP"; then
+              if [ "$attempt" -lt 3 ]; then
+                echo "Gagal download dependency, tunggu 60 detik lalu coba lagi..." | tee -a "$LOG"
+                sleep 60
+              fi
+            else
+              echo "Error kode/kompilasi (bukan masalah jaringan), tidak diulang." | tee -a "$LOG"
+              break
             fi
           done
 
           if [ "$status" -ne 0 ]; then
-            echo "::error::Build gagal setelah 3 percobaan. Download artifact 'build-log' untuk log lengkap."
+            echo "::error::Build gagal. Download artifact 'build-log' untuk log lengkap."
             exit "$status"
           fi
 
@@ -200,9 +209,13 @@ jobs:
             echo "Download log lengkap: scroll ke bagian **Artifacts** di bawah halaman ini, lalu ketuk **build-log**."
             echo ""
             if [ -f "$LOG" ]; then
-              echo "Potongan error terakhir:"
+              echo "Error kompilasi (maks 25 baris):"
               echo '```'
-              (grep -A15 "What went wrong" "$LOG" | tail -n 25) || tail -n 40 "$LOG"
+              grep "^e: " "$LOG" | sed -E 's#file:///home/runner/work/[^/]+/[^/]+/src/##' | sort -u | head -n 25 || true
+              echo '```'
+              echo "Task yang gagal:"
+              echo '```'
+              grep -oE "Execution failed for task '[^']+'" "$LOG" | sort -u || true
               echo '```'
             fi
           } >> "$GITHUB_STEP_SUMMARY"
