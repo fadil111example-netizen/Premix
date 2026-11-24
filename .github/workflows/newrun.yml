@@ -63,8 +63,12 @@ jobs:
           distribution: temurin
           cache: gradle
 
+      # 'packages' di-override karena paket lama 'tools' sudah dihapus Google
+      # (kalau tidak di-override, sdkmanager error: Failed to find package 'tools')
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
 
       # 4. Build semua plugin
       - name: Build plugins
