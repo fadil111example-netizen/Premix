@@ -56,7 +56,10 @@ open class EmturbovidExtractor : ExtractorApi() {
 }
 
 // ============================================================================
-// 2. P2P EXTRACTOR (ORIGINAL - DO NOT TOUCH)
+// 2. P2P EXTRACTOR
+//    Dulu: cloud.hownetwork.xyz/...?id=XXXX
+//    Sekarang: playcdn.de/XXXX?cb=3  (id ada di path). Dibuat mengikuti domain dari URL.
+//    CATATAN: alur API di bawah masih TEBAKAN dari versi lama (api2.php), belum diverifikasi.
 // ============================================================================
 open class P2PExtractor : ExtractorApi() {
     override var name = "P2P"
@@ -65,19 +68,28 @@ open class P2PExtractor : ExtractorApi() {
     data class HownetworkResponse(val file: String?, val link: String?, val label: String?)
 
     override suspend fun getUrl(url: String, referer: String?): List<ExtractorLink>? {
-        val id = url.substringAfter("id=").substringBefore("&")
-        val apiUrl = "$mainUrl/api2.php?id=$id"
+        val base = try { URI(url).let { "${it.scheme}://${it.host}" } } catch (e: Exception) { mainUrl }
+        val domain = base.substringAfter("://")
+
+        // id: bentuk lama "?id=XXXX", bentuk baru "/XXXX?cb=3"
+        val id = if (url.contains("id=")) {
+            url.substringAfter("id=").substringBefore("&")
+        } else {
+            url.substringAfter("://").substringAfter("/").substringBefore("?").substringBefore("#").trim('/')
+        }
+
+        val apiUrl = "$base/api2.php?id=$id"
         val headers = mapOf(
             "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36",
             "Referer" to url,
-            "Origin" to mainUrl,
+            "Origin" to base,
             "X-Requested-With" to "XMLHttpRequest"
         )
         // Parent iframe sekarang bukan lagi playeriframe.sbs (mis. videonode.de), ikuti referer asli
         val parentOrigin = try {
             URI(referer ?: "").takeIf { it.host != null }?.let { "${it.scheme}://${it.host}/" }
         } catch (e: Exception) { null }
-        val formBody = mapOf("r" to (parentOrigin ?: "https://playeriframe.sbs/"), "d" to "cloud.hownetwork.xyz")
+        val formBody = mapOf("r" to (parentOrigin ?: "https://playeriframe.sbs/"), "d" to domain)
         val sources = mutableListOf<ExtractorLink>()
         try {
             val response = app.post(apiUrl, headers = headers, data = formBody).text
@@ -85,13 +97,18 @@ open class P2PExtractor : ExtractorApi() {
             val videoUrl = json?.file ?: json?.link
             if (!videoUrl.isNullOrBlank()) {
                 sources.add(newExtractorLink(source = name, name = name, url = videoUrl, type = ExtractorLinkType.M3U8) {
-                    this.referer = mainUrl
+                    this.referer = base
                     this.quality = Qualities.Unknown.value
                 })
             }
         } catch (e: Exception) { e.printStackTrace() }
         return sources
     }
+}
+
+// Domain baru server P2P
+class PlayCdnExtractor : P2PExtractor() {
+    override var mainUrl = "https://playcdn.de"
 }
 
 // ============================================================================

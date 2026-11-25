@@ -13,6 +13,7 @@ class LayarKacaPlugin : Plugin() {
         // Extractor Servers
         registerExtractorAPI(EmturbovidExtractor()) // TurboVip
         registerExtractorAPI(P2PExtractor())        // P2P
+        registerExtractorAPI(PlayCdnExtractor())    // P2P (domain baru)
         registerExtractorAPI(F16Extractor())        // CAST
         registerExtractorAPI(Mfw09Extractor())      // CAST (domain baru)
     }

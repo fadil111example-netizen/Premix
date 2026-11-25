@@ -31,6 +31,10 @@ class LayarKacaProvider : MainAPI() {
 
     private var domainChecked = false
 
+    // Sementara: kalau server gagal menghasilkan link, tampilkan 1 baris "DEBUG ..." di daftar link
+    // supaya kelihatan gagal di tahap mana. Ubah ke false kalau pemutaran sudah beres.
+    private val debugLinks = true
+
     // ------------------------------------------------------------------
     // Helper
     // ------------------------------------------------------------------
@@ -458,6 +462,26 @@ class LayarKacaProvider : MainAPI() {
         if (!got) {
             loadExtractor(playerUrl, referer, subtitleCallback, cb)
             if (!got) scrapeStreams(playerUrl, referer, subtitleCallback, cb)
+        }
+
+        // --- Diagnosa: kenapa tidak ada link ---
+        if (!got && debugLinks) {
+            val server = Regex("/iframe\\d*/([a-z0-9]+)/").find(playerUrl)?.groupValues?.get(1) ?: "?"
+            val status = if (embed.isNullOrBlank()) {
+                "gagal ambil embedUrl"
+            } else {
+                "embed ${originOf(embed)?.substringAfter("://")} tanpa link"
+            }
+            callback.invoke(
+                newExtractorLink(
+                    source = "DEBUG",
+                    name = "DEBUG $server: $status",
+                    url = embed ?: playerUrl,
+                    type = ExtractorLinkType.VIDEO
+                ) {
+                    this.quality = Qualities.Unknown.value
+                }
+            )
         }
     }
 
