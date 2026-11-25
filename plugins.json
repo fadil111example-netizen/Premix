@@ -1,0 +1,44 @@
+[
+    {
+        "iconUrl": "https://moviebox.ph/favicon.ico",
+        "fileHash": "sha256-70e780d38725263da6a4888205d289f5246250237f1b7e9ee6475dfac860f807",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/fadil111example-netizen/Premix",
+        "fileSize": 31515,
+        "status": 1,
+        "language": "id",
+        "authors": [
+            "aldry84"
+        ],
+        "tvTypes": [
+            "AsianDrama",
+            "TvSeries",
+            "Movie"
+        ],
+        "version": 7,
+        "internalName": "Adimoviebox",
+        "url": "https://raw.githubusercontent.com/fadil111example-netizen/Premix/builds/Adimoviebox.cs3",
+        "name": "Adimoviebox"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=lk21.de&sz=128",
+        "fileHash": "sha256-c0e96ea59b0a82c9d91327b05b32697c15da43303304e5f8541b43e041235913",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/fadil111example-netizen/Premix",
+        "fileSize": 60116,
+        "status": 1,
+        "language": "id",
+        "authors": [
+            "aldry84"
+        ],
+        "tvTypes": [
+            "AsianDrama",
+            "TvSeries",
+            "Movie"
+        ],
+        "version": 10,
+        "internalName": "LayarKacaProvider",
+        "url": "https://raw.githubusercontent.com/fadil111example-netizen/Premix/builds/LayarKacaProvider.cs3",
+        "name": "LayarKacaProvider"
+    }
+]

@@ -1,0 +1,8 @@
+{
+  "name": "Premix Repo",
+  "description": "Kumpulan plugin CloudStream",
+  "manifestVersion": 1,
+  "pluginLists": [
+    "https://raw.githubusercontent.com/fadil111example-netizen/Premix/builds/plugins.json"
+  ]
+}
