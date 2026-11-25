@@ -73,7 +73,11 @@ open class P2PExtractor : ExtractorApi() {
             "Origin" to mainUrl,
             "X-Requested-With" to "XMLHttpRequest"
         )
-        val formBody = mapOf("r" to "https://playeriframe.sbs/", "d" to "cloud.hownetwork.xyz")
+        // Parent iframe sekarang bukan lagi playeriframe.sbs (mis. videonode.de), ikuti referer asli
+        val parentOrigin = try {
+            URI(referer ?: "").takeIf { it.host != null }?.let { "${it.scheme}://${it.host}/" }
+        } catch (e: Exception) { null }
+        val formBody = mapOf("r" to (parentOrigin ?: "https://playeriframe.sbs/"), "d" to "cloud.hownetwork.xyz")
         val sources = mutableListOf<ExtractorLink>()
         try {
             val response = app.post(apiUrl, headers = headers, data = formBody).text
@@ -124,6 +128,8 @@ open class F16Extractor : ExtractorApi() {
             val videoId = url.substringAfter("/e/").substringBefore("?")
             val apiUrl = "$mainUrl/api/videos/$videoId/embed/playback"
             val pageUrl = "$mainUrl/e/$videoId"
+            // Host parent iframe (dulu playeriframe.sbs, sekarang mengikuti referer asli)
+            val parentHost = (try { URI(referer ?: "").host } catch (ex: Exception) { null }) ?: "playeriframe.sbs"
             
             // Generate Fake ID
             val viewerId = randomHex(32) 
@@ -143,9 +149,9 @@ open class F16Extractor : ExtractorApi() {
                 "Referer" to pageUrl,
                 "Origin" to mainUrl,
                 "Content-Type" to "application/json",
-                "x-embed-origin" to "playeriframe.sbs",
+                "x-embed-origin" to parentHost,
                 "x-embed-parent" to pageUrl,
-                "x-embed-referer" to "https://playeriframe.sbs/"
+                "x-embed-referer" to "https://$parentHost/"
             )
 
             // BODY JSON
