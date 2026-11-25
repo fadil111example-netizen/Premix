@@ -70,6 +70,19 @@ jobs:
         with:
           packages: 'platform-tools'
 
+      # 3b. JitPack membangun plugin Gradle CloudStream saat pertama diminta.
+      #     Tunggu sampai siap (maks ±6 menit) supaya build tidak gagal "Could not find ...gradle:master-SNAPSHOT".
+      - name: Warm up JitPack
+        run: |
+          URL="https://jitpack.io/com/github/recloudstream/gradle/master-SNAPSHOT/maven-metadata.xml"
+          for i in $(seq 1 12); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 "$URL" || true)
+            echo "JitPack percobaan $i: HTTP $code"
+            if [ "$code" = "200" ]; then exit 0; fi
+            sleep 30
+          done
+          echo "::warning::JitPack belum siap setelah ±6 menit, build tetap dilanjutkan"
+
       # 4. Build semua plugin
       #    - Seluruh output Gradle disimpan ke logs/build-log.txt
       #    - --continue: semua plugin tetap dicoba walau satu gagal (log lebih lengkap)
@@ -101,8 +114,8 @@ jobs:
 
             if grep -qE "Could not (resolve|find|GET|HEAD)|Read timed out|Connection (reset|refused)|Premature end of" "$TMP"; then
               if [ "$attempt" -lt 3 ]; then
-                echo "Gagal download dependency, tunggu 60 detik lalu coba lagi..." | tee -a "$LOG"
-                sleep 60
+                echo "Gagal download dependency, tunggu 90 detik lalu coba lagi..." | tee -a "$LOG"
+                sleep 90
               fi
             else
               echo "Error kode/kompilasi (bukan masalah jaringan), tidak diulang." | tee -a "$LOG"

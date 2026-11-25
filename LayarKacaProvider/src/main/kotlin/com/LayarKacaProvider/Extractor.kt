@@ -67,6 +67,15 @@ open class P2PExtractor : ExtractorApi() {
     override val requiresReferer = false
     data class HownetworkResponse(val file: String?, val link: String?, val label: String?)
 
+    // Respon baru playcdn.de: GET /verify/<id> -> {"status":"success","fileUrl":"...m3u8","poster":..,"title":..}
+    data class VerifyResponse(
+        val status: String? = null,
+        val fileUrl: String? = null,
+        val title: String? = null,
+        val poster: String? = null,
+        val message: String? = null
+    )
+
     override suspend fun getUrl(url: String, referer: String?): List<ExtractorLink>? {
         val base = try { URI(url).let { "${it.scheme}://${it.host}" } } catch (e: Exception) { mainUrl }
         val domain = base.substringAfter("://")
@@ -78,6 +87,39 @@ open class P2PExtractor : ExtractorApi() {
             url.substringAfter("://").substringAfter("/").substringBefore("?").substringBefore("#").trim('/')
         }
 
+        val ua = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36"
+        val sources = mutableListOf<ExtractorLink>()
+
+        // --- Cara baru (sesuai init_player.js): id = segmen terakhir path, lalu GET /verify/<id> ---
+        if (!url.contains("id=") && id.isNotBlank()) {
+            try {
+                val text = app.get(
+                    "$base/verify/$id",
+                    headers = mapOf(
+                        "User-Agent" to ua,
+                        "Referer" to url,
+                        "X-Requested-With" to "XMLHttpRequest"
+                    )
+                ).text
+                val v = tryParseJson<VerifyResponse>(text)
+                val file = v?.fileUrl
+                if (v?.status == "success" && !file.isNullOrBlank()) {
+                    val full = when {
+                        file.startsWith("http") -> file
+                        file.startsWith("//") -> "https:$file"
+                        else -> "$base/${file.trimStart('/')}"
+                    }
+                    sources.add(newExtractorLink(source = name, name = name, url = full, type = ExtractorLinkType.M3U8) {
+                        this.referer = "$base/"
+                        this.quality = Qualities.Unknown.value
+                        this.headers = mapOf("User-Agent" to ua, "Referer" to "$base/", "Origin" to base)
+                    })
+                }
+            } catch (e: Exception) { e.printStackTrace() }
+            if (sources.isNotEmpty()) return sources
+        }
+
+        // --- Cara lama (cloud.hownetwork.xyz/api2.php) ---
         val apiUrl = "$base/api2.php?id=$id"
         val headers = mapOf(
             "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36",
@@ -90,7 +132,6 @@ open class P2PExtractor : ExtractorApi() {
             URI(referer ?: "").takeIf { it.host != null }?.let { "${it.scheme}://${it.host}/" }
         } catch (e: Exception) { null }
         val formBody = mapOf("r" to (parentOrigin ?: "https://playeriframe.sbs/"), "d" to domain)
-        val sources = mutableListOf<ExtractorLink>()
         try {
             val response = app.post(apiUrl, headers = headers, data = formBody).text
             val json = tryParseJson<HownetworkResponse>(response)
