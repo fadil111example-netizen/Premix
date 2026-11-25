@@ -84,33 +84,39 @@ class LayarKacaProvider : MainAPI() {
     // ------------------------------------------------------------------
     // MAIN PAGE
     // ------------------------------------------------------------------
+    override val mainPage: List<MainPageData> = mainPageOf(
+        "latest-movies" to "Film Terbaru",
+        "top-series-today" to "Series Unggulan",
+        "latest-series" to "Series Update",
+        "latest-korea" to "Korea Terbaru",
+        "latest-action" to "Action Terbaru",
+        "latest-horror" to "Horror Terbaru",
+        "latest-romance" to "Romance Terbaru",
+        "latest-comedy" to "Comedy Terbaru",
+        "latest-thailand" to "Thailand Terbaru",
+        "latest-india" to "India Terbaru"
+    )
+
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        if (page > 1) return newHomePageResponse(emptyList<HomePageList>(), false)
-
         ensureMainUrl()
-        val document = app.get(mainUrl).document
-        val items = ArrayList<HomePageList>()
+        val type = request.data
 
-        fun addWidget(title: String, selector: String) {
-            val list = document.select(selector).mapNotNull { toSearchResult(it) }
-            if (list.isNotEmpty()) items.add(HomePageList(title, list))
+        val items = if (page <= 1) {
+            app.get(mainUrl).document
+                .select("div.widget[data-type='$type'] li.slider")
+                .mapNotNull { toSearchResult(it) }
+        } else {
+            // Situs memuat halaman berikutnya lewat /loadmore/<type>/page/<n> (potongan HTML)
+            try {
+                app.get("$mainUrl/loadmore/$type/page/$page", referer = "$mainUrl/")
+                    .document.select("li.slider")
+                    .mapNotNull { toSearchResult(it) }
+            } catch (e: Exception) {
+                emptyList()
+            }
         }
 
-        fun widget(type: String) = "div.widget[data-type='$type'] li.slider article"
-
-        addWidget("Film Terbaru", widget("latest-movies"))
-        addWidget("Series Unggulan", widget("top-series-today"))
-        addWidget("Series Update", widget("latest-series"))
-        addWidget("Korea Terbaru", widget("latest-korea"))
-        addWidget("Action Terbaru", widget("latest-action"))
-        addWidget("Horror Terbaru", widget("latest-horror"))
-        addWidget("Romance Terbaru", widget("latest-romance"))
-        addWidget("Comedy Terbaru", widget("latest-comedy"))
-        addWidget("Thailand Terbaru", widget("latest-thailand"))
-        addWidget("India Terbaru", widget("latest-india"))
-        addWidget("Daftar Lengkap", "div#post-container article")
-
-        return newHomePageResponse(items, false)
+        return newHomePageResponse(request.name, items)
     }
 
     // ------------------------------------------------------------------
@@ -126,34 +132,49 @@ class LayarKacaProvider : MainAPI() {
         val quality: String?
     )
 
+    // Respon "saran pencarian" yang dipakai kotak search situs: {"results":[{title,slug,type}]}
+    data class SuggestResponse(val results: List<SuggestItem>? = null)
+    data class SuggestItem(
+        val title: String? = null,
+        val slug: String? = null,
+        val type: String? = null
+    )
+
+    private fun suggestToResult(item: SuggestItem): SearchResponse? {
+        val slug = item.slug
+        val title = item.title
+        if (slug.isNullOrBlank() || title.isNullOrBlank()) return null
+
+        val type = item.type.orEmpty().lowercase()
+        // Hasil saran juga memuat artis, sutradara, genre, dll. Itu bukan film.
+        if (type in listOf("artist", "director", "genre", "translator", "country", "year")) return null
+
+        val href = fixUrl(slug)
+        return if (type.contains("series")) {
+            newTvSeriesSearchResponse(title, href, TvType.TvSeries) { }
+        } else {
+            newMovieSearchResponse(title, href, TvType.Movie) { }
+        }
+    }
+
     override suspend fun search(query: String): List<SearchResponse> {
         ensureMainUrl()
         val encoded = URLEncoder.encode(query, "UTF-8")
+        val headers = mapOf(
+            "Origin" to mainUrl,
+            "Referer" to "$mainUrl/",
+            "User-Agent" to userAgent
+        )
 
-        // 1) Halaman pencarian situs (form GET /search?s=...)
+        // 1) API pencarian lengkap (ada poster, tahun, kualitas)
         try {
-            val doc = app.get("$mainUrl/search?s=$encoded", referer = "$mainUrl/").document
-            val results = doc.select("div#post-container article")
-                .mapNotNull { toSearchResult(it) }
-                .distinctBy { it.url }
-            if (results.isNotEmpty()) return results
-        } catch (e: Exception) {
-        }
-
-        // 2) API JSON (cara lama) sebagai cadangan
-        try {
-            val headers = mapOf(
-                "Origin" to mainUrl,
-                "Referer" to "$mainUrl/",
-                "User-Agent" to userAgent
-            )
             val response = app.get(
                 "https://gudangvape.com/search.php?s=$encoded&page=1",
                 headers = headers
             ).text
             val json = tryParseJson<Lk21SearchResponse>(response)
 
-            return json?.data?.mapNotNull { item ->
+            val list = json?.data?.mapNotNull { item ->
                 val href = fixUrl(item.slug)
                 val posterUrl = item.poster?.let {
                     if (it.startsWith("http")) it else "https://poster.assetsy.de/wp-content/uploads/$it"
@@ -174,7 +195,26 @@ class LayarKacaProvider : MainAPI() {
                         this.year = item.year
                     }
                 }
-            } ?: emptyList()
+            }.orEmpty()
+            if (list.isNotEmpty()) return list
+        } catch (e: Exception) {
+        }
+
+        // 2) API saran pencarian (sama dengan kotak search di website, sesuai script.js)
+        try {
+            val text = app.get("https://gudangvape.com/?s=$encoded", headers = headers).text
+            val list = tryParseJson<SuggestResponse>(text)?.results.orEmpty()
+                .mapNotNull { suggestToResult(it) }
+            if (list.isNotEmpty()) return list
+        } catch (e: Exception) {
+        }
+
+        // 3) Halaman pencarian HTML sebagai pilihan terakhir
+        try {
+            val doc = app.get("$mainUrl/search?s=$encoded", referer = "$mainUrl/").document
+            return doc.select("div#post-container article")
+                .mapNotNull { toSearchResult(it) }
+                .distinctBy { it.url }
         } catch (e: Exception) {
             return emptyList()
         }
@@ -266,7 +306,7 @@ class LayarKacaProvider : MainAPI() {
         val actors = document.select("div.detail p:contains(Bintang Film) a")
             .map { ActorData(Actor(it.text(), "")) }
         val recommendations = document
-            .select("div.mob-related-series article, div.related-video article")
+            .select("div.widget:has(h2:contains(Terkait)) article")
             .mapNotNull { toSearchResult(it) }
 
         // Daftar episode ada di <script id="season-data"> (JSON)
@@ -405,6 +445,13 @@ class LayarKacaProvider : MainAPI() {
             val finalUrl = if (embed.startsWith("//")) "https:$embed" else embed
             loadExtractor(finalUrl, playerUrl, subtitleCallback, cb)
             if (!got) scrapeStreams(finalUrl, playerUrl, subtitleCallback, cb)
+            // Domain server CAST sering berganti (f16px.com -> mfw09.org, ...), pola /e/<id> sama
+            if (!got && finalUrl.contains("/e/")) {
+                try {
+                    F16Extractor().getUrl(finalUrl, playerUrl)?.forEach { cb(it) }
+                } catch (e: Exception) {
+                }
+            }
         }
 
         // --- Cadangan: cara lama (iframe langsung di halaman) ---
@@ -433,7 +480,7 @@ class LayarKacaProvider : MainAPI() {
                 }
             }
 
-            val html = page.html().replace("\\/", "/")
+            val html = page.html().replace("\\/", "/").replace("\\u0026", "&")
             val originUrl = originOf(wrapperUrl) ?: mainUrl
             Regex("(?i)https?://[^\\s\"'<>\\\\]+?\\.(?:m3u8|mp4)(?:\\?[^\\s\"'<>\\\\]*)?")
                 .findAll(html)

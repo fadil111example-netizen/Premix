@@ -125,9 +125,11 @@ open class F16Extractor : ExtractorApi() {
         val sources = mutableListOf<ExtractorLink>()
         
         try {
+            // Pakai domain dari URL embed (domain server ini sering berganti)
+            val base = try { URI(url).let { "${it.scheme}://${it.host}" } } catch (ex: Exception) { mainUrl }
             val videoId = url.substringAfter("/e/").substringBefore("?")
-            val apiUrl = "$mainUrl/api/videos/$videoId/embed/playback"
-            val pageUrl = "$mainUrl/e/$videoId"
+            val apiUrl = "$base/api/videos/$videoId/embed/playback"
+            val pageUrl = "$base/e/$videoId"
             // Host parent iframe (dulu playeriframe.sbs, sekarang mengikuti referer asli)
             val parentHost = (try { URI(referer ?: "").host } catch (ex: Exception) { null }) ?: "playeriframe.sbs"
             
@@ -147,7 +149,7 @@ open class F16Extractor : ExtractorApi() {
             val headers = mapOf(
                 "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36",
                 "Referer" to pageUrl,
-                "Origin" to mainUrl,
+                "Origin" to base,
                 "Content-Type" to "application/json",
                 "x-embed-origin" to parentHost,
                 "x-embed-parent" to pageUrl,
@@ -190,7 +192,7 @@ open class F16Extractor : ExtractorApi() {
                                 url = source.url,
                                 type = ExtractorLinkType.M3U8
                             ) {
-                                this.referer = "$mainUrl/"
+                                this.referer = "$base/"
                                 // UPDATE: Auto Quality (480p -> 480)
                                 this.quality = getQualityFromName(source.label)
                             })
@@ -222,4 +224,9 @@ open class F16Extractor : ExtractorApi() {
             null
         }
     }
+}
+
+// Domain baru server CAST (pola /e/<id> sama dengan f16px.com)
+class Mfw09Extractor : F16Extractor() {
+    override var mainUrl = "https://mfw09.org"
 }
